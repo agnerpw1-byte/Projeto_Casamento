@@ -84,7 +84,10 @@ function logout() {
 
 function startListening() {
   if (unsubscribe) unsubscribe()
-  unsubscribe = subscribeItems(newItems => { items = newItems; render() })
+  unsubscribe = subscribeItems(newItems => {
+    items = newItems
+    render()
+  })
 }
 
 function renderApp() {
