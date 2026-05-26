@@ -2,7 +2,7 @@ import {
   getPassword, setPassword,
   addItem, updateItem, deleteItem,
   reorderItems, subscribeItems
-} from './src/db.js'
+} from './db.js'
 
 // ── STATE ──────────────────────────────────────────────────────────────────
 let items       = []
