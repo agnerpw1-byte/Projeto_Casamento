@@ -41,24 +41,6 @@
   </div>
 </div>
 
-<!-- Change password modal -->
-<div class="modal-bg" id="chpw-modal" style="display:none" onclick="closeChpw(event)">
-  <div class="modal">
-    <div class="modal-handle"></div>
-    <h3>Alterar senha</h3>
-    <div class="modal-fields">
-      <div><label>Senha atual</label><input type="password" id="chpw-old" /></div>
-      <div><label>Nova senha</label><input type="password" id="chpw-new" /></div>
-      <div><label>Confirmar nova senha</label><input type="password" id="chpw-confirm" /></div>
-    </div>
-    <p id="chpw-error" style="font-size:13px;color:#c05050;margin-top:10px;display:none"></p>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeChpw()">Cancelar</button>
-      <button class="btn-save" onclick="savePassword()">Salvar</button>
-    </div>
-  </div>
-</div>
-
 <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -1,6 +1,5 @@
 import { initializeApp } from 'firebase/app'
 import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth'
 
 // ── FIREBASE ───────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -13,11 +12,10 @@ const firebaseConfig = {
   measurementId:     "G-D5Y3DH8Y5T"
 }
 const firebaseApp = initializeApp(firebaseConfig)
-const db   = getFirestore(firebaseApp)
-const auth = getAuth(firebaseApp)
+const db = getFirestore(firebaseApp)
 
-// ── AUTH ───────────────────────────────────────────────────────────────────
-const ADMIN_EMAIL = 'admin@casamento.app' // usuário criado no Firebase Authentication
+// ── ACESSO DE GERÊNCIA ───────────────────────────────────────────────────────
+const ADMIN_PASSWORD = 'Picareta123'
 
 // ── DB ─────────────────────────────────────────────────────────────────────
 const ITEMS_COL = 'items'
@@ -49,32 +47,48 @@ function subscribeItems(callback) {
 let items       = []
 let filter      = 'todos'
 let editId      = null
-let loggedIn    = false
+let view        = 'welcome' // 'welcome' | 'gifts' | 'admin'
 let unsubscribe = null
 let dragSrcIdx  = null
 let dragSrc     = null
 
-// ── ROTA PÚBLICA (convidados via QR code, sem senha) ────────────────────────
-const PUBLIC_HASH = '#presentes'
+startListening()
+render()
 
-if (location.hash === PUBLIC_HASH) {
-  renderPublicPage()
-} else {
-  onAuthStateChanged(auth, user => {
-    loggedIn = !!user
-    if (!loggedIn && unsubscribe) { unsubscribe(); unsubscribe = null; items = [] }
-    renderApp()
-    if (loggedIn) startListening()
-  })
+function startListening() {
+  if (unsubscribe) unsubscribe()
+  unsubscribe = subscribeItems(newItems => { items = newItems; render() })
 }
 
-function getPublicLink() {
-  return `${location.origin}${location.pathname}${PUBLIC_HASH}`
-}
-
-function renderPublicPage() {
+function render() {
   const app = document.getElementById('app')
+  if (view === 'welcome') renderWelcome(app)
+  else if (view === 'gifts') renderGifts(app)
+  else renderAdmin(app)
+}
+
+function getSiteLink() { return `${location.origin}${location.pathname}` }
+
+// ── PÁGINA DE BOAS-VINDAS ──────────────────────────────────────────────────
+function renderWelcome(app) {
   app.innerHTML = `
+    <button class="btn-gerencia" id="btn-gerencia" title="Gerência"><i class="ti ti-settings"></i></button>
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="hearts">♡ ♡ ♡</div>
+        <h2>Seja bem-vindo(a)!</h2>
+        <p class="welcome-text">Ficamos muito felizes em ter você com a gente nessa nova fase. Preparamos uma listinha de presentes para ajudar a montar nosso lar — qualquer ajuda é muito bem-vinda!</p>
+        <button class="btn-login" id="btn-ver-lista">Ver lista de presentes</button>
+      </div>
+    </div>`
+  document.getElementById('btn-ver-lista').addEventListener('click', () => { view = 'gifts'; render() })
+  bindGerencia()
+}
+
+// ── PÁGINA DA LISTA (convidados) ───────────────────────────────────────────
+function renderGifts(app) {
+  app.innerHTML = `
+    <button class="btn-gerencia" id="btn-gerencia" title="Gerência"><i class="ti ti-settings"></i></button>
     <div class="header">
       <div class="header-hearts">♡ ♡ ♡</div>
       <h1>Lista de Casamento</h1>
@@ -82,132 +96,74 @@ function renderPublicPage() {
     <div class="guest-header">
       <div style="font-size:26px;margin-bottom:8px">🎁</div>
       <h2>Lista de presentes</h2>
-      <p>Escolha um item e deixe seu nome.<br>Qualquer ajuda é muito bem-vinda!</p>
+      <p>Escolha um item e deixe seu nome e celular.<br>Qualquer ajuda é muito bem-vinda!</p>
     </div>
-    <div id="guest-list-public" class="guest-list"></div>`
-  if (unsubscribe) unsubscribe()
-  unsubscribe = subscribeItems(newItems => { items = newItems; renderGuestList('guest-list-public') })
+    <div id="guest-list" class="guest-list"></div>`
+  renderGuestList('guest-list')
+  bindGerencia()
 }
 
-async function tryLogin() {
-  const pw = document.getElementById('inp-pw').value
-  try {
-    await signInWithEmailAndPassword(auth, ADMIN_EMAIL, pw)
-    // onAuthStateChanged cuida de atualizar loggedIn, renderizar e começar a ouvir os dados
-  } catch {
-    document.getElementById('login-error').style.display = 'block'
-    document.getElementById('inp-pw').value = ''
-    document.getElementById('inp-pw').focus()
-  }
-}
-
-async function logout() {
-  await signOut(auth)
-  // onAuthStateChanged cuida do resto
-}
-
-function startListening() {
-  if (unsubscribe) unsubscribe()
-  unsubscribe = subscribeItems(newItems => {
-    items = newItems
-    render()
+function bindGerencia() {
+  document.getElementById('btn-gerencia').addEventListener('click', () => {
+    const pw = prompt('Senha de gerência:')
+    if (pw === null) return
+    if (pw === ADMIN_PASSWORD) { view = 'admin'; render() }
+    else alert('Senha incorreta.')
   })
 }
 
-function renderApp() {
-  const app = document.getElementById('app')
-  if (!loggedIn) {
-    app.innerHTML = `
-      <div class="login-wrap">
-        <div class="login-card">
-          <div class="hearts">♡ ♡ ♡</div>
-          <h2>Lista de Casamento</h2>
-          <div class="login-fields">
-            <div><label>Senha</label><input type="password" id="inp-pw" placeholder="Digite a senha..." autocomplete="current-password" /></div>
-            <button class="btn-login" id="btn-entrar">Entrar</button>
-          </div>
-          <p class="login-error" id="login-error">Senha incorreta. Tente novamente.</p>
-        </div>
-      </div>`
-    document.getElementById('btn-entrar').addEventListener('click', tryLogin)
-    document.getElementById('inp-pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin() })
-  } else {
-    app.innerHTML = `
-      <div class="topbar">
-        <button class="btn-top" id="btn-qrcode"><i class="ti ti-qrcode"></i> QR code</button>
-        <button class="btn-top" id="btn-senha"><i class="ti ti-lock"></i> Senha</button>
-        <button class="btn-top" id="btn-sair"><i class="ti ti-logout"></i> Sair</button>
-      </div>
-      <div class="header">
-        <div class="header-hearts">♡ ♡ ♡</div>
-        <h1>Lista de Casamento</h1>
-        <p>Gerencie os itens para o lar</p>
-      </div>
-      <div class="tabs">
-        <button class="tab active" id="tab-admin-btn"><i class="ti ti-list-check"></i> Gerenciar lista</button>
-        <button class="tab" id="tab-guest-btn"><i class="ti ti-gift"></i> Lista de presentes</button>
-      </div>
-      <div id="tab-admin">
-        <div class="stats" id="stats"></div>
-        <div class="add-form">
-          <h3>Adicionar item</h3>
-          <div class="form-col">
-            <div class="form-group"><label>Nome do item</label><input type="text" id="inp-nome" placeholder="Ex: Sofá, panelas, TV..." /></div>
-            <div class="form-row-2">
-              <div class="form-group"><label>Valor (R$)</label><input type="number" id="inp-valor" placeholder="0,00" min="0" step="0.01" inputmode="decimal" /></div>
-              <div class="form-group"><label>Prioridade</label>
-                <select id="inp-prioridade"><option value="alta">Alta</option><option value="media" selected>Média</option><option value="baixa">Baixa</option></select>
-              </div>
-            </div>
-            <div class="form-group"><label>Categoria</label>
-              <select id="inp-categoria"><option>Cozinha</option><option>Sala</option><option>Quarto</option><option>Banheiro</option><option>Eletrodoméstico</option><option>Eletrônico</option><option>Decoração</option><option>Outros</option></select>
-            </div>
-            <button class="btn-add" id="btn-adicionar">+ Adicionar</button>
+// ── PAINEL DE GERÊNCIA ──────────────────────────────────────────────────────
+function renderAdmin(app) {
+  app.innerHTML = `
+    <div class="topbar">
+      <button class="btn-top" id="btn-qrcode"><i class="ti ti-qrcode"></i> QR code</button>
+      <button class="btn-top" id="btn-sair"><i class="ti ti-logout"></i> Sair</button>
+    </div>
+    <div class="header">
+      <div class="header-hearts">♡ ♡ ♡</div>
+      <h1>Gerência da lista</h1>
+      <p>Adicione e edite os itens para o lar</p>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="add-form">
+      <h3>Adicionar item</h3>
+      <div class="form-col">
+        <div class="form-group"><label>Nome do item</label><input type="text" id="inp-nome" placeholder="Ex: Sofá, panelas, TV..." /></div>
+        <div class="form-row-2">
+          <div class="form-group"><label>Valor (R$)</label><input type="number" id="inp-valor" placeholder="0,00" min="0" step="0.01" inputmode="decimal" /></div>
+          <div class="form-group"><label>Prioridade</label>
+            <select id="inp-prioridade"><option value="alta">Alta</option><option value="media" selected>Média</option><option value="baixa">Baixa</option></select>
           </div>
         </div>
-        <div class="filter-bar">
-          <button class="filter-btn active" data-filter="todos">Todos</button>
-          <button class="filter-btn" data-filter="pendentes">Pendentes</button>
-          <button class="filter-btn" data-filter="comprados">Comprados</button>
-          <button class="filter-btn" data-filter="alta">Alta prioridade</button>
+        <div class="form-group"><label>Categoria</label>
+          <select id="inp-categoria"><option>Cozinha</option><option>Sala</option><option>Quarto</option><option>Banheiro</option><option>Eletrodoméstico</option><option>Eletrônico</option><option>Decoração</option><option>Outros</option></select>
         </div>
-        <div class="item-list" id="item-list"></div>
+        <button class="btn-add" id="btn-adicionar">+ Adicionar</button>
       </div>
-      <div id="tab-guest" style="display:none">
-        <div class="guest-header">
-          <div style="font-size:26px;margin-bottom:8px">🎁</div>
-          <h2>Lista de presentes</h2>
-          <p>Itens que ainda precisamos comprar.<br>Qualquer ajuda é muito bem-vinda!</p>
-        </div>
-        <div id="guest-list" class="guest-list"></div>
-        <button class="copy-btn" id="btn-copiar"><i class="ti ti-copy"></i> Copiar lista para compartilhar</button>
-      </div>`
-    bindEvents(); render()
-  }
+    </div>
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="todos">Todos</button>
+      <button class="filter-btn" data-filter="pendentes">Pendentes</button>
+      <button class="filter-btn" data-filter="comprados">Comprados</button>
+      <button class="filter-btn" data-filter="alta">Alta prioridade</button>
+    </div>
+    <div class="item-list" id="item-list"></div>
+    <button class="copy-btn" id="btn-copiar"><i class="ti ti-copy"></i> Copiar lista de pendentes</button>`
+  bindAdminEvents()
+  renderStats(); renderList()
 }
 
-function bindEvents() {
-  document.getElementById('btn-senha').addEventListener('click', openChpw)
-  document.getElementById('btn-sair').addEventListener('click', logout)
+function bindAdminEvents() {
+  document.getElementById('btn-sair').addEventListener('click', () => { view = 'welcome'; render() })
   document.getElementById('btn-qrcode').addEventListener('click', openQrModal)
   document.getElementById('btn-adicionar').addEventListener('click', addItemHandler)
   document.getElementById('inp-nome').addEventListener('keydown', e => { if (e.key === 'Enter') addItemHandler() })
-  document.getElementById('tab-admin-btn').addEventListener('click', () => switchTab('admin'))
-  document.getElementById('tab-guest-btn').addEventListener('click', () => switchTab('guest'))
   document.getElementById('btn-copiar').addEventListener('click', copyList)
   document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', () => setFilter(btn.dataset.filter, btn)))
 }
 
-function switchTab(t) {
-  document.getElementById('tab-admin-btn').classList.toggle('active', t === 'admin')
-  document.getElementById('tab-guest-btn').classList.toggle('active', t === 'guest')
-  document.getElementById('tab-admin').style.display = t === 'admin' ? '' : 'none'
-  document.getElementById('tab-guest').style.display  = t === 'guest' ? '' : 'none'
-  if (t === 'guest') renderGuestList('guest-list')
-}
-
 function openQrModal() {
-  const link = getPublicLink()
+  const link = getSiteLink()
   const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(link)}`
   const wrap = document.createElement('div')
   wrap.className = 'modal-bg'
@@ -216,7 +172,7 @@ function openQrModal() {
     <div class="modal qr-body">
       <div class="modal-handle"></div>
       <h3>QR code para os convites</h3>
-      <p class="qr-desc">Aponte a câmera para ir direto à lista de presentes, sem precisar de senha.</p>
+      <p class="qr-desc">Aponte a câmera para abrir a página de boas-vindas com a lista de presentes.</p>
       <div class="qr-img-wrap"><img src="${qrImg}" alt="QR code" /></div>
       <p class="qr-link">${link}</p>
       <div class="modal-actions">
@@ -279,32 +235,8 @@ async function saveEdit() {
   } finally { btn.disabled = false; btn.textContent = 'Salvar' }
 }
 
-function openChpw() { document.getElementById('chpw-modal').style.display = 'flex' }
-
-async function savePassword() {
-  const o = document.getElementById('chpw-old').value, n = document.getElementById('chpw-new').value, c = document.getElementById('chpw-confirm').value
-  const err = document.getElementById('chpw-error'); err.style.display = 'none'
-  if (!n || n.length < 6) { err.textContent = 'A nova senha deve ter ao menos 6 caracteres.'; err.style.display = 'block'; return }
-  if (n !== c)            { err.textContent = 'As senhas não coincidem.'; err.style.display = 'block'; return }
-  try {
-    const cred = EmailAuthProvider.credential(ADMIN_EMAIL, o)
-    await reauthenticateWithCredential(auth.currentUser, cred)
-    await updatePassword(auth.currentUser, n)
-    closeChpwModal(); alert('Senha alterada com sucesso!')
-  } catch {
-    err.textContent = 'Senha atual incorreta.'; err.style.display = 'block'
-  }
-}
-
-function closeChpwModal() {
-  document.getElementById('chpw-modal').style.display = 'none'
-  ;['chpw-old','chpw-new','chpw-confirm'].forEach(id => { document.getElementById(id).value = '' })
-  document.getElementById('chpw-error').style.display = 'none'
-}
-
-function closeModal(e)  { if (!e || e.target === document.getElementById('modal'))      { document.getElementById('modal').style.display = 'none'; editId = null } }
-function closeChpw(e)   { if (!e || e.target === document.getElementById('chpw-modal')) closeChpwModal() }
-window.closeModal = closeModal; window.saveEdit = saveEdit; window.closeChpw = closeChpw; window.savePassword = savePassword
+function closeModal(e) { if (!e || e.target === document.getElementById('modal')) { document.getElementById('modal').style.display = 'none'; editId = null } }
+window.closeModal = closeModal; window.saveEdit = saveEdit
 
 function fmt(v) { return v ? 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—' }
 
@@ -341,6 +273,9 @@ function renderList() {
           ${item.valor ? `<span class="meta-tag tag-valor">${fmt(item.valor)}</span>` : ''}
           ${item.comprado ? '<span class="meta-tag tag-comprado"><i class="ti ti-check" style="font-size:11px"></i> Comprado</span>' : ''}
         </div>
+        ${item.comprado && item.reservadoPor
+          ? `<div class="guest-item-reservado">🎀 ${escapeHtml(item.reservadoPor)}${item.reservadoTelefone ? ` · ${escapeHtml(item.reservadoTelefone)}` : ''}</div>`
+          : ''}
       </div>
       <div class="item-actions">
         <button class="btn-check ${item.comprado ? 'done' : ''}" data-action="check" data-id="${item.id}"><i class="ti ti-check"></i></button>
@@ -359,8 +294,7 @@ function renderList() {
   bindDrag()
 }
 
-function render() { if (!loggedIn) return; renderStats(); renderList() }
-
+// ── LISTA DE PRESENTES (convidados) ────────────────────────────────────────
 function renderGuestList(containerId) {
   const ordem = { alta: 0, media: 1, baixa: 2 }
   const lista = [...items].sort((a, b) => {
@@ -376,8 +310,8 @@ function renderGuestList(containerId) {
       <span class="guest-item-num">${idx + 1}.</span>
       <div class="guest-item-name">
         ${item.nome}
-        ${item.comprado && item.reservadoPor
-          ? `<div class="guest-item-reservado">🎀 Reservado por <strong>${escapeHtml(item.reservadoPor)}</strong></div>`
+        ${item.comprado
+          ? `<div class="guest-item-reservado">🎀 Já reservado</div>`
           : ''}
       </div>
       ${!item.comprado
@@ -396,13 +330,46 @@ function escapeHtml(s) {
 function openReserve(id) {
   const item = items.find(i => i.id === id)
   if (!item || item.comprado) return
-  const nome = prompt(`Digite seu nome para reservar "${item.nome}":`)
-  if (!nome || !nome.trim()) return
-  reserveItem(id, nome.trim())
+  const wrap = document.createElement('div')
+  wrap.className = 'modal-bg'
+  wrap.style.display = 'flex'
+  wrap.innerHTML = `
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <h3>Reservar "${escapeHtml(item.nome)}"</h3>
+      <div class="modal-fields">
+        <div><label>Seu nome</label><input type="text" id="res-nome" placeholder="Nome completo" /></div>
+        <div><label>Celular (WhatsApp)</label><input type="tel" id="res-tel" placeholder="(00) 00000-0000" inputmode="tel" /></div>
+      </div>
+      <p class="form-error" id="res-error">Preencha nome e celular.</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="res-cancel">Cancelar</button>
+        <button class="btn-save" id="res-confirm">Confirmar</button>
+      </div>
+    </div>`
+  document.body.appendChild(wrap)
+  wrap.addEventListener('click', e => { if (e.target === wrap) document.body.removeChild(wrap) })
+  document.getElementById('res-cancel').addEventListener('click', () => document.body.removeChild(wrap))
+  document.getElementById('res-confirm').addEventListener('click', async () => {
+    const nome = document.getElementById('res-nome').value.trim()
+    const tel  = document.getElementById('res-tel').value.trim()
+    const err  = document.getElementById('res-error')
+    if (!nome || !tel) { err.style.display = 'block'; return }
+    err.style.display = 'none'
+    const btn = document.getElementById('res-confirm')
+    btn.disabled = true; btn.textContent = 'Salvando...'
+    try {
+      await reserveItem(id, nome, tel)
+      document.body.removeChild(wrap)
+    } catch {
+      btn.disabled = false; btn.textContent = 'Confirmar'
+      err.textContent = 'Não foi possível salvar, tente novamente.'; err.style.display = 'block'
+    }
+  })
 }
 
-async function reserveItem(id, nome) {
-  await updateItem(id, { comprado: true, reservadoPor: nome })
+async function reserveItem(id, nome, telefone) {
+  await updateItem(id, { comprado: true, reservadoPor: nome, reservadoTelefone: telefone })
 }
 
 function copyList() {
