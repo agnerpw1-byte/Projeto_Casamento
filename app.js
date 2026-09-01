@@ -63,7 +63,35 @@ let unsubscribe = null
 let dragSrcIdx  = null
 let dragSrc     = null
 
-renderApp()
+// ── ROTA PÚBLICA (convidados via QR code, sem senha) ────────────────────────
+const PUBLIC_HASH = '#presentes'
+
+if (location.hash === PUBLIC_HASH) {
+  renderPublicPage()
+} else {
+  renderApp()
+}
+
+function getPublicLink() {
+  return `${location.origin}${location.pathname}${PUBLIC_HASH}`
+}
+
+function renderPublicPage() {
+  const app = document.getElementById('app')
+  app.innerHTML = `
+    <div class="header">
+      <div class="header-hearts">♡ ♡ ♡</div>
+      <h1>Lista de Casamento</h1>
+    </div>
+    <div class="guest-header">
+      <div style="font-size:26px;margin-bottom:8px">🎁</div>
+      <h2>Lista de presentes</h2>
+      <p>Escolha um item e deixe seu nome.<br>Qualquer ajuda é muito bem-vinda!</p>
+    </div>
+    <div id="guest-list-public" class="guest-list"></div>`
+  if (unsubscribe) unsubscribe()
+  unsubscribe = subscribeItems(newItems => { items = newItems; renderGuestList('guest-list-public') })
+}
 
 async function tryLogin() {
   const pw      = document.getElementById('inp-pw').value
@@ -110,6 +138,7 @@ function renderApp() {
   } else {
     app.innerHTML = `
       <div class="topbar">
+        <button class="btn-top" id="btn-qrcode"><i class="ti ti-qrcode"></i> QR code</button>
         <button class="btn-top" id="btn-senha"><i class="ti ti-lock"></i> Senha</button>
         <button class="btn-top" id="btn-sair"><i class="ti ti-logout"></i> Sair</button>
       </div>
@@ -164,6 +193,7 @@ function renderApp() {
 function bindEvents() {
   document.getElementById('btn-senha').addEventListener('click', openChpw)
   document.getElementById('btn-sair').addEventListener('click', logout)
+  document.getElementById('btn-qrcode').addEventListener('click', openQrModal)
   document.getElementById('btn-adicionar').addEventListener('click', addItemHandler)
   document.getElementById('inp-nome').addEventListener('keydown', e => { if (e.key === 'Enter') addItemHandler() })
   document.getElementById('tab-admin-btn').addEventListener('click', () => switchTab('admin'))
@@ -177,7 +207,33 @@ function switchTab(t) {
   document.getElementById('tab-guest-btn').classList.toggle('active', t === 'guest')
   document.getElementById('tab-admin').style.display = t === 'admin' ? '' : 'none'
   document.getElementById('tab-guest').style.display  = t === 'guest' ? '' : 'none'
-  if (t === 'guest') renderGuest()
+  if (t === 'guest') renderGuestList('guest-list')
+}
+
+function openQrModal() {
+  const link = getPublicLink()
+  const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(link)}`
+  const wrap = document.createElement('div')
+  wrap.className = 'modal-bg'
+  wrap.style.display = 'flex'
+  wrap.innerHTML = `
+    <div class="modal qr-body">
+      <div class="modal-handle"></div>
+      <h3>QR code para os convites</h3>
+      <p class="qr-desc">Aponte a câmera para ir direto à lista de presentes, sem precisar de senha.</p>
+      <div class="qr-img-wrap"><img src="${qrImg}" alt="QR code" /></div>
+      <p class="qr-link">${link}</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="qr-close">Fechar</button>
+        <button class="btn-save" id="qr-copy">Copiar link</button>
+      </div>
+    </div>`
+  wrap.addEventListener('click', e => { if (e.target === wrap) document.body.removeChild(wrap) })
+  document.body.appendChild(wrap)
+  document.getElementById('qr-close').addEventListener('click', () => document.body.removeChild(wrap))
+  document.getElementById('qr-copy').addEventListener('click', () => {
+    navigator.clipboard.writeText(link).then(() => alert('Link copiado!')).catch(() => prompt('Copie:', link))
+  })
 }
 
 function setFilter(f, btn) {
@@ -304,11 +360,48 @@ function renderList() {
 
 function render() { if (!loggedIn) return; renderStats(); renderList() }
 
-function renderGuest() {
-  const pendentes = items.filter(i => !i.comprado).sort((a, b) => ({ alta: 0, media: 1, baixa: 2 }[a.prioridade] - { alta: 0, media: 1, baixa: 2 }[b.prioridade]))
-  const gl = document.getElementById('guest-list')
-  if (!pendentes.length) { gl.innerHTML = '<div class="empty-state">Todos os itens já foram comprados!</div>'; return }
-  gl.innerHTML = pendentes.map((item, idx) => `<div class="guest-item"><span class="guest-item-num">${idx + 1}.</span><div class="guest-item-name">${item.nome}</div></div>`).join('')
+function renderGuestList(containerId) {
+  const ordem = { alta: 0, media: 1, baixa: 2 }
+  const lista = [...items].sort((a, b) => {
+    const byStatus = Number(!!a.comprado) - Number(!!b.comprado)
+    if (byStatus !== 0) return byStatus
+    return ordem[a.prioridade] - ordem[b.prioridade]
+  })
+  const gl = document.getElementById(containerId)
+  if (!gl) return
+  if (!lista.length) { gl.innerHTML = '<div class="empty-state">Nenhum item na lista ainda.</div>'; return }
+  gl.innerHTML = lista.map((item, idx) => `
+    <div class="guest-item ${item.comprado ? 'reservado' : ''}">
+      <span class="guest-item-num">${idx + 1}.</span>
+      <div class="guest-item-name">
+        ${item.nome}
+        ${item.comprado && item.reservadoPor
+          ? `<div class="guest-item-reservado">🎀 Reservado por <strong>${escapeHtml(item.reservadoPor)}</strong></div>`
+          : ''}
+      </div>
+      ${!item.comprado
+        ? `<button class="btn-reservar" data-action="reservar" data-id="${item.id}">Vou dar esse</button>`
+        : ''}
+    </div>`).join('')
+  gl.querySelectorAll('[data-action="reservar"]').forEach(btn => {
+    btn.addEventListener('click', () => openReserve(btn.dataset.id))
+  })
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+function openReserve(id) {
+  const item = items.find(i => i.id === id)
+  if (!item || item.comprado) return
+  const nome = prompt(`Digite seu nome para reservar "${item.nome}":`)
+  if (!nome || !nome.trim()) return
+  reserveItem(id, nome.trim())
+}
+
+async function reserveItem(id, nome) {
+  await updateItem(id, { comprado: true, reservadoPor: nome })
 }
 
 function copyList() {
