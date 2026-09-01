@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
-import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, getDoc } from 'firebase/firestore'
+import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore'
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth'
 
 // ── FIREBASE ───────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -12,24 +13,14 @@ const firebaseConfig = {
   measurementId:     "G-D5Y3DH8Y5T"
 }
 const firebaseApp = initializeApp(firebaseConfig)
-const db = getFirestore(firebaseApp)
+const db   = getFirestore(firebaseApp)
+const auth = getAuth(firebaseApp)
+
+// ── AUTH ───────────────────────────────────────────────────────────────────
+const ADMIN_EMAIL = 'admin@casamento.app' // usuário criado no Firebase Authentication
 
 // ── DB ─────────────────────────────────────────────────────────────────────
-const ITEMS_COL    = 'items'
-const SETTINGS_COL = 'settings'
-const PASSWORD_DOC = 'auth'
-const DEFAULT_PW   = 'Espada123'
-
-async function getPassword() {
-  try {
-    const snap = await getDoc(doc(db, SETTINGS_COL, PASSWORD_DOC))
-    return snap.exists() ? snap.data().password : DEFAULT_PW
-  } catch { return DEFAULT_PW }
-}
-
-async function setPassword(pw) {
-  await setDoc(doc(db, SETTINGS_COL, PASSWORD_DOC), { password: pw })
-}
+const ITEMS_COL = 'items'
 
 async function addItem(item) {
   const id = String(Date.now())
@@ -69,7 +60,12 @@ const PUBLIC_HASH = '#presentes'
 if (location.hash === PUBLIC_HASH) {
   renderPublicPage()
 } else {
-  renderApp()
+  onAuthStateChanged(auth, user => {
+    loggedIn = !!user
+    if (!loggedIn && unsubscribe) { unsubscribe(); unsubscribe = null; items = [] }
+    renderApp()
+    if (loggedIn) startListening()
+  })
 }
 
 function getPublicLink() {
@@ -94,20 +90,20 @@ function renderPublicPage() {
 }
 
 async function tryLogin() {
-  const pw      = document.getElementById('inp-pw').value
-  const correct = await getPassword()
-  if (pw === correct) {
-    loggedIn = true; renderApp(); startListening()
-  } else {
+  const pw = document.getElementById('inp-pw').value
+  try {
+    await signInWithEmailAndPassword(auth, ADMIN_EMAIL, pw)
+    // onAuthStateChanged cuida de atualizar loggedIn, renderizar e começar a ouvir os dados
+  } catch {
     document.getElementById('login-error').style.display = 'block'
     document.getElementById('inp-pw').value = ''
     document.getElementById('inp-pw').focus()
   }
 }
 
-function logout() {
-  if (unsubscribe) { unsubscribe(); unsubscribe = null }
-  loggedIn = false; items = []; renderApp()
+async function logout() {
+  await signOut(auth)
+  // onAuthStateChanged cuida do resto
 }
 
 function startListening() {
@@ -288,11 +284,16 @@ function openChpw() { document.getElementById('chpw-modal').style.display = 'fle
 async function savePassword() {
   const o = document.getElementById('chpw-old').value, n = document.getElementById('chpw-new').value, c = document.getElementById('chpw-confirm').value
   const err = document.getElementById('chpw-error'); err.style.display = 'none'
-  const cur = await getPassword()
-  if (o !== cur)          { err.textContent = 'Senha atual incorreta.'; err.style.display = 'block'; return }
-  if (!n || n.length < 4) { err.textContent = 'A nova senha deve ter ao menos 4 caracteres.'; err.style.display = 'block'; return }
+  if (!n || n.length < 6) { err.textContent = 'A nova senha deve ter ao menos 6 caracteres.'; err.style.display = 'block'; return }
   if (n !== c)            { err.textContent = 'As senhas não coincidem.'; err.style.display = 'block'; return }
-  await setPassword(n); closeChpwModal(); alert('Senha alterada com sucesso!')
+  try {
+    const cred = EmailAuthProvider.credential(ADMIN_EMAIL, o)
+    await reauthenticateWithCredential(auth.currentUser, cred)
+    await updatePassword(auth.currentUser, n)
+    closeChpwModal(); alert('Senha alterada com sucesso!')
+  } catch {
+    err.textContent = 'Senha atual incorreta.'; err.style.display = 'block'
+  }
 }
 
 function closeChpwModal() {
